@@ -1,0 +1,257 @@
+Sub SendMailMerge()
+ Dim OutlookApp As Object
+ Dim OutlookNamespace As Object
+ Dim OutlookMail As Object
+ Dim wsData As Worksheet
+ Dim wsVariables As Worksheet
+ Dim lastRow As Long
+ Dim i As Long
+ Dim emailCol As Long, ccCol As Long, bccCol As Long
+ Dim mailHTMLBody As String
+ Dim mailSubject As String
+ Dim draftSubject As String
+ Dim sharedMailbox As String
+ Dim wb As Workbook
+ Dim cellValue As String
+ Dim individualAttachment As String
+ Dim draftFolder As Object
+ Dim draftEmail As Object
+ Dim found As Boolean
+ Dim col As Long
+ Dim header As String
+ Dim attachmentCols() As Long
+ Dim j As Integer
+ On Error GoTo ErrHandler
+ ' Ensure the active workbook is set
+ Set wb = ActiveWorkbook
+ ' Ensure the worksheets exist
+ Set wsData = wb.Sheets("Mailmerge Data")
+ Set wsVariables = wb.Sheets("Variables")
+ If wsData Is Nothing Then
+ MsgBox "Worksheet 'Mailmerge Data' not found.", vbExclamation
+ Exit Sub
+ End If
+ If wsVariables Is Nothing Then
+ MsgBox "Worksheet 'Variables' not found.", vbExclamation
+ Exit Sub
+ End If
+ ' Find the last row with data in the Mailmerge Data sheet
+ lastRow = wsData.Cells(wsData.Rows.Count, "A").End(xlUp).Row
+ ' Read the draft email subject and shared mailbox from the Variables sheet
+ draftSubject = wsVariables.Range("C2").Value
+ sharedMailbox = wsVariables.Range("C3").Value
+ ' Create Outlook objects
+ Set OutlookApp = CreateObject("Outlook.Application")
+ Set OutlookNamespace = OutlookApp.GetNamespace("MAPI")
+ Set draftFolder = OutlookNamespace.GetDefaultFolder(16) ' olFolderDrafts
+ ' Find the draft email by subject
+ found = False
+ For Each draftEmail In draftFolder.Items
+ If draftEmail.Subject = draftSubject Then
+ draftEmail.Display ' Open as a standard mail item
+ Application.Wait (Now + TimeValue("0:00:02")) ' Wait for 2 seconds
+ Set draftEmail = OutlookApp.ActiveInspector.CurrentItem
+ found = True
+ Exit For
+ End If
+ Next draftEmail
+ If Not found Then
+ MsgBox "Draft email not found.", vbExclamation
+ Exit Sub
+ End If
+ ' Identify the special columns (Email, CC, BCC, Attachments)
+ emailCol = Application.WorksheetFunction.Match("Email", wsData.Rows(1), 0)
+ On Error Resume Next
+ ccCol = Application.WorksheetFunction.Match("CC", wsData.Rows(1), 0)
+ bccCol = Application.WorksheetFunction.Match("BCC", wsData.Rows(1), 0)
+ On Error GoTo ErrHandler
+ ' Identify all "Attachment" columns
+ col = 1
+ j = 0
+ Do Until IsEmpty(wsData.Cells(1, col))
+ If wsData.Cells(1, col).Value = "Attachment" Then
+ ReDim Preserve attachmentCols(j)
+ attachmentCols(j) = col
+ j = j + 1
+ End If
+ col = col + 1
+ Loop
+ ' Loop through each row
+ For i = 2 To lastRow
+ ' Create a new mail item by copying the draft email
+ Set OutlookMail = draftEmail.Copy
+ ' Get the HTML body of the email
+ mailHTMLBody = OutlookMail.HTMLBody
+ mailSubject = OutlookMail.Subject
+ ' Replace placeholders with data from the Excel sheet
+ For col = 1 To 26 ' Loop through columns A-Z
+ header = wsData.Cells(1, col).Value
+ If header <> "" Then
+ cellValue = wsData.Cells(i, col).Text ' Get the formatted text of the cell
+ mailHTMLBody = Replace(mailHTMLBody, "{{" & header & "}}", cellValue)
+ mailSubject = Replace(mailSubject, "{{" & header & "}}", cellValue)
+ End If
+ Next col
+ ' Set email properties
+ With OutlookMail
+ .To = wsData.Cells(i, emailCol).Text
+ If ccCol > 0 Then .CC = wsData.Cells(i, ccCol).Text
+ If bccCol > 0 Then .BCC = wsData.Cells(i, bccCol).Text
+ .Subject = mailSubject
+ .HTMLBody = mailHTMLBody
+ .SentOnBehalfOfName = sharedMailbox
+ ' Attach files from all "Attachment" columns if any exist
+ If j > 0 Then
+ For j = LBound(attachmentCols) To UBound(attachmentCols)
+ individualAttachment = wsData.Cells(i, attachmentCols(j)).Text
+ If individualAttachment <> "" And Dir(individualAttachment) <> "" Then
+ .Attachments.Add individualAttachment
+ End If
+ Next j
+ End If
+ .Send ' Use .Send to send the email directly
+ End With
+ Next i
+ ' Close the original draft email without saving changes
+ draftEmail.Close 1 ' olDiscard
+ ' Clean up
+ Set OutlookMail = Nothing
+ Set OutlookApp = Nothing
+ Exit Sub
+ErrHandler:
+ MsgBox "Error " & Err.Number & ": " & Err.Description, vbExclamation, "Error"
+ If Not OutlookMail Is Nothing Then
+ OutlookMail.Close 1
+ End If
+ If Not draftEmail Is Nothing Then
+ draftEmail.Close 1
+ End If
+End Sub
+Sub SendTestEmail()
+ Dim OutlookApp As Object
+ Dim OutlookNamespace As Object
+ Dim OutlookMail As Object
+ Dim wsData As Worksheet
+ Dim wsVariables As Worksheet
+ Dim lastCol As Long
+ Dim j As Long
+ Dim emailCol As Long, ccCol As Long, bccCol As Long
+ Dim mailHTMLBody As String
+ Dim mailSubject As String
+ Dim draftFolder As Object
+ Dim draftEmail As Object
+ Dim draftSubject As String
+ Dim sharedMailbox As String
+ Dim testEmail As String
+ Dim wb As Workbook
+ Dim cellValue As String
+ Dim individualAttachment As String
+ Dim found As Boolean
+ Dim col As Long
+ Dim header As String
+ Dim attachmentCols() As Long
+ On Error GoTo ErrHandler
+ ' Ensure the active workbook is set
+ Set wb = ActiveWorkbook
+ ' Ensure the worksheets exist
+ Set wsData = wb.Sheets("Mailmerge Data")
+ Set wsVariables = wb.Sheets("Variables")
+ If wsData Is Nothing Then
+ MsgBox "Worksheet 'Mailmerge Data' not found.", vbExclamation
+ Exit Sub
+ End If
+ If wsVariables Is Nothing Then
+ MsgBox "Worksheet 'Variables' not found.", vbExclamation
+ Exit Sub
+ End If
+ ' Find the last column with data in the Mailmerge Data sheet
+ lastCol = wsData.Cells(1, wsData.Columns.Count).End(xlToLeft).Column
+ ' Read the draft email subject, shared mailbox, and test email from the Variables sheet
+ draftSubject = wsVariables.Range("C2").Value
+ sharedMailbox = wsVariables.Range("C3").Value
+ testEmail = wsVariables.Range("C4").Value ' Assuming the test email is in cell C4
+ ' Create Outlook objects
+ Set OutlookApp = CreateObject("Outlook.Application")
+ Set OutlookNamespace = OutlookApp.GetNamespace("MAPI")
+ Set draftFolder = OutlookNamespace.GetDefaultFolder(16) ' olFolderDrafts
+ ' Find the draft email by subject
+ found = False
+ For Each draftEmail In draftFolder.Items
+ If draftEmail.Subject = draftSubject Then
+ draftEmail.Display ' Open as a standard mail item
+ Application.Wait (Now + TimeValue("0:00:02")) ' Wait for 2 seconds
+ Set draftEmail = OutlookApp.ActiveInspector.CurrentItem
+ found = True
+ Exit For
+ End If
+ Next draftEmail
+ If Not found Then
+ MsgBox "Draft email not found.", vbExclamation
+ Exit Sub
+ End If
+ ' Identify the special columns (Email, CC, BCC, Attachments)
+ emailCol = Application.WorksheetFunction.Match("Email", wsData.Rows(1), 0)
+ On Error Resume Next
+ ccCol = Application.WorksheetFunction.Match("CC", wsData.Rows(1), 0)
+ bccCol = Application.WorksheetFunction.Match("BCC", wsData.Rows(1), 0)
+ On Error GoTo ErrHandler
+ ' Identify all "Attachment" columns
+ col = 1
+ j = 0
+ Do Until IsEmpty(wsData.Cells(1, col))
+ If wsData.Cells(1, col).Value = "Attachment" Then
+ ReDim Preserve attachmentCols(j)
+ attachmentCols(j) = col
+ j = j + 1
+ End If
+ col = col + 1
+ Loop
+ ' Use the first row of data for the test email
+ Dim i As Long
+ i = 2
+ ' Create a new mail item by copying the draft email
+ Set OutlookMail = draftEmail.Copy
+ ' Get the HTML body of the email
+ mailHTMLBody = OutlookMail.HTMLBody
+ mailSubject = OutlookMail.Subject
+ ' Replace placeholders with data from the Excel sheet
+ For col = 1 To 26 ' Loop through columns A-Z
+ header = wsData.Cells(1, col).Value
+ If header <> "" Then
+ cellValue = wsData.Cells(i, col).Text ' Get the formatted text of the cell
+ mailHTMLBody = Replace(mailHTMLBody, "{{" & header & "}}", cellValue)
+ mailSubject = Replace(mailSubject, "{{" & header & "}}", cellValue)
+ End If
+ Next col
+ ' Set email properties
+ With OutlookMail
+ .To = testEmail
+ .Subject = mailSubject
+ .HTMLBody = mailHTMLBody
+ .SentOnBehalfOfName = sharedMailbox
+ ' Attach files from all "Attachment" columns if any exist
+ If j > 0 Then
+ For j = LBound(attachmentCols) To UBound(attachmentCols)
+ individualAttachment = wsData.Cells(i, attachmentCols(j)).Text
+ If individualAttachment <> "" And Dir(individualAttachment) <> "" Then
+ .Attachments.Add individualAttachment
+ End If
+ Next j
+ End If
+ .Send ' Use .Send to send the email directly
+ End With
+ ' Close the original draft email without saving changes
+ draftEmail.Close 1 ' olDiscard
+ ' Clean up
+ Set OutlookMail = Nothing
+ Set OutlookApp = Nothing
+ Exit Sub
+ErrHandler:
+ MsgBox "Error " & Err.Number & ": " & Err.Description, vbExclamation, "Error"
+ If Not OutlookMail Is Nothing Then
+ OutlookMail.Close 1
+ End If
+ If Not draftEmail Is Nothing Then
+ draftEmail.Close 1
+ End If
+End Sub
